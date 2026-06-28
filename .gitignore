@@ -1,0 +1,8 @@
+app/dist
+app/venv
+app/.venv
+app/.pytest_cache
+app/**/.mypy_cache
+app/**/.ruff_cache
+app/**/.DS_Store
+app/**/__pycache__
