@@ -1,0 +1,28 @@
+name = "automatom"
+summary = "Universal AI workflow & agent automation platform: scheduled tasks, web search, browser-automated work, and LLM-driven execution through a simple intent API."
+owner = "minagayid"
+license = "MIT"
+requires-python = ">=3.11"
+
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic",
+    "pydantic-settings",
+    "python-dotenv",
+    "httpx",
+    "aiosqlite",
+    "croniter",
+    "psutil",
+]
+
+[project.scripts]
+automatom = "automatom.cli:main"
+automatom-server = "automatom.server:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
