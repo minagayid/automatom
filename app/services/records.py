@@ -153,6 +153,19 @@ class Store:
             params.append(error)
         if not updates:
             return
+        current = self.get_run(run_uid)
+        if current is not None:
+            if status is not None:
+                current["status"] = status
+            if finished_at is not None:
+                current["finishedAt"] = finished_at
+            if result is not None:
+                current["result"] = result
+            if error is not None:
+                current["error"] = error
+            updates.append("schema = ?")
+            params.append(_serialize(current))
+
         params.append(run_uid)
         with sqlite3.connect(self.path) as conn:
             conn.execute(
