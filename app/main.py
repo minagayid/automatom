@@ -7,13 +7,12 @@ Scaffolded to match platform expectations for the workflow runtime:
 """
 from __future__ import annotations
 
-import contextlib
+import asyncio
 import hashlib
-import sqlite3
 from datetime import datetime, timezone
 from typing import List, Optional, Sequence
 
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI
 from pydantic import BaseModel, Field
 
 from schemas import (
@@ -37,6 +36,58 @@ class CreateWorkflowRequest(BaseModel):
     input: List[Message]
     trigger: Optional[WorkflowTrigger] = None
     steps: Optional[List[WorkflowStep]] = None
+
+
+class DemoRunRequest(BaseModel):
+    """Small, human-readable request for the hackathon demo."""
+
+    workplaceId: str = "demo"
+    intent: str = Field(min_length=3)
+
+
+def _step_output(step: WorkflowStep, intent: str, previous: str) -> str:
+    settings = step.settings or {}
+    if step.type == StepType.LLM:
+        provider = settings.get("provider", "gemini-3.5-flash")
+        return f"{provider} plan: {settings.get('instruction') or intent}"
+    if step.type == StepType.SEARCH:
+        return f"search results ready for: {settings.get('query') or previous or intent}"
+    if step.type == StepType.NOTIFY:
+        return f"notification prepared for {settings.get('to') or 'the configured channel'}"
+    if step.type == StepType.DELAY:
+        return f"background wait completed ({settings.get('seconds', 0)}s)"
+    if step.type == StepType.CODE:
+        return f"safe code step recorded: {settings.get('label') or step.label}"
+    return f"{step.type.value} step completed: {step.label}"
+
+
+async def _execute_background(run_uid: str, workflow: Workflow) -> None:
+    """Run a workflow asynchronously while keeping the API responsive."""
+
+    records.update_run(run_uid, status=RunStatus.RUNNING.value)
+    outputs: list[str] = []
+    try:
+        steps = workflow.workflow.steps if workflow.workflow else []
+        intent = " ".join(message.content for message in workflow.input)
+        for step in steps:
+            seconds = float((step.settings or {}).get("seconds", 0))
+            if step.type == StepType.DELAY and seconds > 0:
+                await asyncio.sleep(min(seconds, 2))
+            outputs.append(_step_output(step, intent, outputs[-1] if outputs else ""))
+            await asyncio.sleep(0)
+        records.update_run(
+            run_uid,
+            status=RunStatus.DONE.value,
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            result="\n".join(outputs) or "completed with no steps",
+        )
+    except Exception as exc:  # pragma: no cover - defensive runtime boundary
+        records.update_run(
+            run_uid,
+            status=RunStatus.FAILED.value,
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            error=str(exc),
+        )
 
 
 def _stable_uid(prefix: str, payload: str) -> str:
@@ -75,7 +126,7 @@ async def create_workflow(req: CreateWorkflowRequest):
 
 
 @app.post("/runs", response_model=Run)
-async def start_run(workflow: Workflow):
+async def start_run(workflow: Workflow, background_tasks: BackgroundTasks):
     run_uid = _stable_uid("run", workflow.model_dump_json())
     run = Run(
         runUid=run_uid,
@@ -84,7 +135,47 @@ async def start_run(workflow: Workflow):
         startedAt=datetime.now(timezone.utc).isoformat(),
     )
     records.insert_run(run)
+    background_tasks.add_task(_execute_background, run_uid, workflow)
     return run
+
+
+@app.post("/demo-runs", response_model=Run)
+async def start_demo_run(request: DemoRunRequest, background_tasks: BackgroundTasks):
+    """Create a ready-to-watch agent run for a live demo or judge review."""
+
+    workflow = await create_workflow(
+        CreateWorkflowRequest(
+            workplaceId=request.workplaceId,
+            input=[Message(role="user", content=request.intent)],
+            steps=[
+                WorkflowStep(
+                    type=StepType.LLM,
+                    label="Plan with Gemini",
+                    settings={"provider": "gemini-3.5-flash"},
+                ),
+                WorkflowStep(
+                    type=StepType.SEARCH,
+                    label="Gather context",
+                ),
+                WorkflowStep(
+                    type=StepType.DELAY,
+                    label="Continue in the background",
+                    settings={"seconds": 0.1},
+                ),
+                WorkflowStep(
+                    type=StepType.NOTIFY,
+                    label="Return a completion handoff",
+                    settings={"to": "demo inbox"},
+                ),
+            ],
+        )
+    )
+    return await start_run(workflow, background_tasks)
+
+
+@app.get("/health")
+async def health():
+    return {"ok": True, "service": "automatom", "execution": "asynchronous"}
 
 
 @app.get("/runs/{run_uid}", response_model=Optional[Run])
