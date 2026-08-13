@@ -1,50 +1,111 @@
-# Automatom
+# Automatom — BriefRunner
 
-**Universal AI workflow & agent automation platform.**
+**A Professional Agent that turns repetitive requests into reviewable background briefs.**
 
-Automatom lets you turn a plain-text intent into a structured, runnable workflow in one API call. It exposes a minimal REST surface — `POST /workflows`, `POST /runs`, `GET /runs/:id` — backed by a SQLite store and a pluggable step engine.
+Automatom is a small, inspectable workflow runtime for professionals who repeat
+the same research and status-reporting work every week. Its hackathon agent,
+**BriefRunner**, accepts a plain-language request such as “prepare my weekly
+competitor brief,” gathers bounded context, drafts a structured brief, and
+stops at an explicit human approval boundary before any notification could be
+sent.
 
-## Features
+## Why this matters
 
-- **Intent → Workflow** — Describe what you want in plain language; Automatom scaffolds the steps
-- - **Workflow Engine** — LLM, HTTP, code, and approval steps out of the box
-  - - **Run Tracking** — Every run is persisted with status, timestamps, and step output
-    - - **FastAPI + Pydantic** — Auto-generated Swagger at `/docs`
-      - - **SQLite-backed** — Zero external dependencies for local development
-       
-        - ## Quick Start
-       
-        - ```bash
-          cd app
-          pip install -r pyproject.toml   # or: pip install fastapi uvicorn pydantic aiosqlite
-          uvicorn main:app --reload --port 8000
-          ```
+Busy teams do not need another chat answer; they need dependable progress on
+the repetitive work behind a decision. BriefRunner makes that work visible and
+reviewable. The person remains the decision-maker, while the agent handles the
+first pass and records what happened.
 
-          Visit http://localhost:8000/docs for interactive API docs.
+## How it works
 
-          ## API
+1. A user submits an intent through the FastAPI API.
+2. The background runner creates an inspectable workflow run.
+3. The Strands Agents SDK path uses two bounded, read-only tools: lookup of
+   demo context and brief drafting. With AWS credentials and a Bedrock model,
+   this path runs through `BedrockModel`.
+4. The default offline mode produces deterministic context so judges can run
+   the demo without cloud credentials.
+5. The result is `awaiting_approval`; `POST /runs/{runUid}/approve` changes the
+   state to `approved` but still leaves `sent: false`. No message is sent
+   automatically.
 
-          | Method | Path | Description |
-          |--------|------|-------------|
-          | `POST` | `/workflows` | Create a workflow from intent + steps |
-          | `POST` | `/runs` | Start a run for a workflow |
-          | `GET` | `/runs/{run_uid}` | Fetch run status and output |
+This architecture follows the Strands Agents SDK pattern of composing an
+`Agent` with decorated tools, while keeping the demo honest and reproducible.
 
-          ## Project Structure
+## Quick start
 
-          ```
-          automatom/
-          ├── app/
-          │   ├── agents/          # Agent definitions and tools
-          │   ├── engine/          # Step execution engine
-          │   ├── services/        # Persistence (records, runs)
-          │   ├── main.py          # FastAPI entrypoint
-          │   ├── schemas.py       # Pydantic models
-          │   ├── engine.py        # Workflow execution loop
-          │   └── pyproject.toml   # Dependencies
-          └── README.md
-          ```
+```bash
+cd app
+python -m pip install -e .
+uvicorn main:app --reload --port 8000
+```
 
-          ## License
+The Strands and AWS dependencies are included for the cloud-backed path. For
+the deterministic local demo, no AWS credentials are needed. To opt into the
+Strands path, set `AUTOMATOM_AGENT_MODE=strands`, `STRANDS_MODEL_ID` (for
+example `amazon.nova-lite-v1:0`), and `AWS_REGION`.
 
-          MIT
+## Demo
+
+```bash
+curl -X POST http://localhost:8000/demo-runs \
+  -H "content-type: application/json" \
+  -d '{"intent":"Prepare a weekly competitor brief"}'
+```
+
+Poll the returned `runUid`:
+
+```bash
+curl http://localhost:8000/runs/<runUid>
+```
+
+The completed `result` contains `agentMode`, `brief`,
+`notificationStatus: "pending_approval"`, `approvalRequired: true`, and
+`sent: false`. After reviewing the brief, approve it explicitly:
+
+```bash
+curl -X POST http://localhost:8000/runs/<runUid>/approve
+```
+
+Approval is intentionally a state transition, not an automatic outbound
+action. A real integration would add a separately authenticated sender after
+the approval boundary.
+
+## API
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/workflows` | Create a workflow from intent and steps |
+| `POST` | `/runs` | Start a workflow and return immediately |
+| `POST` | `/demo-runs` | Start the BriefRunner demo agent |
+| `GET` | `/runs/{run_uid}` | Fetch run status and output |
+| `POST` | `/runs/{run_uid}/approve` | Approve a prepared result without sending |
+| `GET` | `/health` | Check runtime availability |
+
+## Safety and scope
+
+BriefRunner has no arbitrary shell tool, no uncontrolled outbound messaging,
+and no claim of live competitor data in offline mode. Its tool surface is
+bounded, the output is persisted in SQLite, and every demo notification stops
+for human review. Production integrations should add scoped credentials,
+sandboxed execution, audit logging, and an authenticated approval workflow.
+
+## Verification
+
+```bash
+python -m unittest -v tests.test_strands_runtime tests.test_demo_contract
+```
+
+The tests cover the offline brief contract, the approval transition, and the
+API-facing camel-case result payload.
+
+## Hackathon submission
+
+- Track: **Professional Agents**
+- SDK: **Strands Agents SDK** with an optional Amazon Bedrock model
+- Architecture diagram: `output/automatom-brief-runner-architecture.pdf`
+- Demo video: `output/automatom-brief-runner-demo.webm`
+
+## License
+
+MIT
