@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from datetime import datetime, timezone
 from typing import List, Optional, Sequence
 
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from schemas import (
@@ -27,8 +28,10 @@ from schemas import (
     WorkflowTrigger,
 )
 from services import records
+from strands_runtime import ProfessionalBriefAgent, result_payload
 
 app = FastAPI(title="Automatom")
+professional_agent = ProfessionalBriefAgent()
 
 
 class CreateWorkflowRequest(BaseModel):
@@ -67,8 +70,18 @@ async def _execute_background(run_uid: str, workflow: Workflow) -> None:
     records.update_run(run_uid, status=RunStatus.RUNNING.value)
     outputs: list[str] = []
     try:
-        steps = workflow.workflow.steps if workflow.workflow else []
         intent = " ".join(message.content for message in workflow.input)
+        if workflow.meta.get("agent") == "professional_brief":
+            agent_result = professional_agent.run(intent)
+            records.update_run(
+                run_uid,
+                status=RunStatus.DONE.value,
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                result=json.dumps(result_payload(agent_result)),
+            )
+            return
+
+        steps = workflow.workflow.steps if workflow.workflow else []
         for step in steps:
             seconds = float((step.settings or {}).get("seconds", 0))
             if step.type == StepType.DELAY and seconds > 0:
@@ -170,6 +183,7 @@ async def start_demo_run(request: DemoRunRequest, background_tasks: BackgroundTa
             ],
         )
     )
+    workflow.meta = {"agent": "professional_brief", "approval_required": True}
     return await start_run(workflow, background_tasks)
 
 
@@ -181,3 +195,24 @@ async def health():
 @app.get("/runs/{run_uid}", response_model=Optional[Run])
 async def get_run(run_uid: str):
     return records.get_run(run_uid)
+
+
+@app.post("/runs/{run_uid}/approve", response_model=Run)
+async def approve_run(run_uid: str):
+    """Approve a prepared notification without sending it automatically."""
+
+    record = records.get_run(run_uid)
+    if record is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    try:
+        payload = json.loads(record.get("result") or "{}")
+        approved = professional_agent.approve(payload["runId"])
+    except (KeyError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="run is not awaiting agent approval") from exc
+
+    records.update_run(
+        run_uid,
+        result=json.dumps(result_payload(approved)),
+    )
+    updated = records.get_run(run_uid)
+    return Run.model_validate(updated)
