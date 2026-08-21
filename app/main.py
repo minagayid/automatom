@@ -30,6 +30,8 @@ from schemas import (
 from services import records
 from strands_runtime import ProfessionalBriefAgent, result_payload
 
+store = records.Store()
+
 app = FastAPI(title="Automatom")
 professional_agent = ProfessionalBriefAgent()
 
@@ -67,13 +69,13 @@ def _step_output(step: WorkflowStep, intent: str, previous: str) -> str:
 async def _execute_background(run_uid: str, workflow: Workflow) -> None:
     """Run a workflow asynchronously while keeping the API responsive."""
 
-    records.update_run(run_uid, status=RunStatus.RUNNING.value)
+    store.update_run(run_uid, status=RunStatus.RUNNING.value)
     outputs: list[str] = []
     try:
         intent = " ".join(message.content for message in workflow.input)
         if workflow.meta.get("agent") == "professional_brief":
             agent_result = professional_agent.run(intent)
-            records.update_run(
+            store.update_run(
                 run_uid,
                 status=RunStatus.DONE.value,
                 finished_at=datetime.now(timezone.utc).isoformat(),
@@ -88,14 +90,14 @@ async def _execute_background(run_uid: str, workflow: Workflow) -> None:
                 await asyncio.sleep(min(seconds, 2))
             outputs.append(_step_output(step, intent, outputs[-1] if outputs else ""))
             await asyncio.sleep(0)
-        records.update_run(
+        store.update_run(
             run_uid,
             status=RunStatus.DONE.value,
             finished_at=datetime.now(timezone.utc).isoformat(),
             result="\n".join(outputs) or "completed with no steps",
         )
     except Exception as exc:  # pragma: no cover - defensive runtime boundary
-        records.update_run(
+        store.update_run(
             run_uid,
             status=RunStatus.FAILED.value,
             finished_at=datetime.now(timezone.utc).isoformat(),
@@ -129,13 +131,14 @@ async def create_workflow(req: CreateWorkflowRequest):
         workflow=WorkflowDefinition(steps=steps),
     )
 
-    records.insert_workflow(workflow_uid, workflow)
+    store.insert_workflow(workflow_uid, workflow)
 
-    return Workflow.model_construct(
-        **workflow.model_dump(),
-        schemaUid=f"{Workflow.model_fields['schemaUid'].default}:{workflow_uid[:8]}",
-        taskTriggerUid=_stable_uid("trig", intent_text),
+    workflow_payload = workflow.model_dump()
+    workflow_payload["schemaUid"] = (
+        f"{Workflow.model_fields['schemaUid'].default}:{workflow_uid[:8]}"
     )
+    workflow_payload["taskTriggerUid"] = _stable_uid("trig", intent_text)
+    return Workflow.model_validate(workflow_payload)
 
 
 @app.post("/runs", response_model=Run)
@@ -147,7 +150,7 @@ async def start_run(workflow: Workflow, background_tasks: BackgroundTasks):
         status=RunStatus.QUEUED,
         startedAt=datetime.now(timezone.utc).isoformat(),
     )
-    records.insert_run(run)
+    store.insert_run(run)
     background_tasks.add_task(_execute_background, run_uid, workflow)
     return run
 
@@ -194,14 +197,14 @@ async def health():
 
 @app.get("/runs/{run_uid}", response_model=Optional[Run])
 async def get_run(run_uid: str):
-    return records.get_run(run_uid)
+    return store.get_run(run_uid)
 
 
 @app.post("/runs/{run_uid}/approve", response_model=Run)
 async def approve_run(run_uid: str):
     """Approve a prepared notification without sending it automatically."""
 
-    record = records.get_run(run_uid)
+    record = store.get_run(run_uid)
     if record is None:
         raise HTTPException(status_code=404, detail="run not found")
     try:
@@ -210,9 +213,9 @@ async def approve_run(run_uid: str):
     except (KeyError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail="run is not awaiting agent approval") from exc
 
-    records.update_run(
+    store.update_run(
         run_uid,
         result=json.dumps(result_payload(approved)),
     )
-    updated = records.get_run(run_uid)
+    updated = store.get_run(run_uid)
     return Run.model_validate(updated)
