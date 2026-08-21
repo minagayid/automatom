@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 
-AgentMode = Literal["offline", "strands"]
+AgentMode = Literal["offline", "strands", "gemini"]
 AgentStatus = Literal["awaiting_approval", "approved"]
 NotificationStatus = Literal["pending_approval", "approved_for_send"]
 
@@ -59,9 +59,12 @@ class ProfessionalBriefAgent:
     def __init__(self, mode: str | None = None) -> None:
         requested = mode or os.getenv("AUTOMATOM_AGENT_MODE", "offline")
         if requested == "auto":
-            requested = "strands" if os.getenv("STRANDS_MODEL_ID") else "offline"
-        if requested not in {"offline", "strands"}:
-            raise ValueError("mode must be 'offline', 'strands', or 'auto'")
+            if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
+                requested = "gemini"
+            else:
+                requested = "strands" if os.getenv("STRANDS_MODEL_ID") else "offline"
+        if requested not in {"offline", "strands", "gemini"}:
+            raise ValueError("mode must be 'offline', 'strands', 'gemini', or 'auto'")
         self.mode: AgentMode = requested  # type: ignore[assignment]
         self._runs: dict[str, AgentResult] = {}
 
@@ -75,6 +78,9 @@ class ProfessionalBriefAgent:
         brief = _offline_brief(cleaned)
         if self.mode == "strands":
             brief = self._run_strands(cleaned)
+        elif self.mode == "gemini":
+            from google_runtime import generate_reviewable_brief
+            brief = generate_reviewable_brief(cleaned)
         result = AgentResult(
             run_id=run_id,
             mode=mode,

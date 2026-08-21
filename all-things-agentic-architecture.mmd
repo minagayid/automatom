@@ -1,0 +1,21 @@
+flowchart LR
+    U[User intent] --> API[FastAPI API on Cloud Run]
+    API --> Q[Async workflow runner]
+    Q --> AG[Google GenAI SDK / Gemini 3.5 Flash]
+    Q --> CTX[Bounded read-only context tools]
+    AG --> DRAFT[Reviewable brief]
+    DRAFT --> DB[(Firestore or Cloud SQL run state)]
+    DB --> UI[Hosted judge UI / run-status endpoint]
+    UI --> AP[Human approval checkpoint]
+    AP --> SAFE[Approved handoff state]
+    SAFE -. no automatic send .-> OUT[Optional future connector]
+    API --> OBS[Cloud Logging / trace evidence]
+    Q --> OBS
+    AG --> OBS
+
+    classDef cloud fill:#e8f0fe,stroke:#1a73e8,color:#174ea6;
+    classDef safety fill:#e8f5e9,stroke:#188038,color:#137333;
+    classDef data fill:#fff8e1,stroke:#f9ab00,color:#8a4b00;
+    class API,Q,AG,OBS cloud;
+    class AP,SAFE safety;
+    class DB data;

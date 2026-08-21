@@ -109,3 +109,23 @@ API-facing camel-case result payload.
 ## License
 
 MIT
+
+
+## Google-native hackathon mode
+
+The `hackathon/all-things-agentic-google-native` branch adds an optional Gemini path for the All Things Agentic Hackathon while preserving the deterministic offline demo and the existing optional Strands/Bedrock path. The Google path uses the Google GenAI SDK through `google_runtime.py` and remains bounded: it prepares a reviewable brief, records uncertainty, and never sends notifications or performs irreversible actions.
+
+To run the Google path locally:
+
+```bash
+cd app
+python -m pip install -e .
+export AUTOMATOM_AGENT_MODE=gemini
+export GEMINI_API_KEY=your_key_here
+export GEMINI_MODEL=gemini-3.5-flash
+uvicorn main:app --reload --port 8000
+```
+
+To run safely without cloud credentials, keep `AUTOMATOM_AGENT_MODE=offline`. The intended hosted deployment target is Google Cloud Run using the repository `Dockerfile` and `requirements-google.txt`. The Cloud Run service should inject `GEMINI_API_KEY` as a managed secret, expose only the API/health routes required for judging, and keep the approval boundary enabled.
+
+The hackathon submission must additionally include a public hosted URL, a repository URL, this spin-up guide, a Google/Gemini architecture diagram, and a public demo video no longer than four minutes showing the asynchronous run, approval checkpoint, and Cloud Run evidence. Deployment, key configuration, public-link creation, and final submission are not performed automatically from this local branch.

@@ -1,0 +1,11 @@
+# Minimal Cloud Run dependencies for the Google-native hackathon branch
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-dotenv
+httpx
+aiosqlite
+croniter
+psutil
+google-genai
