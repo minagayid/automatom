@@ -113,9 +113,9 @@ MIT
 
 ## Google-native hackathon mode
 
-The `hackathon/all-things-agentic-google-native` branch adds an optional Gemini path for the All Things Agentic Hackathon while preserving the deterministic offline demo and the existing optional Strands/Bedrock path. The Google path uses the Google GenAI SDK through `google_runtime.py` and remains bounded: it prepares a reviewable brief, records uncertainty, and never sends notifications or performs irreversible actions.
+The `hackathon/all-things-agentic-google-native` branch adds a bounded Gemini path for the All Things Agentic Hackathon while preserving the deterministic offline demo and the existing optional Strands/Bedrock path. The Google path uses the Google GenAI SDK through `google_runtime.py`: it prepares a reviewable brief, records uncertainty, and never sends notifications or performs irreversible actions.
 
-To run the Google path locally:
+### Local Gemini API-key mode
 
 ```bash
 cd app
@@ -126,6 +126,23 @@ export GEMINI_MODEL=gemini-3.5-flash
 uvicorn main:app --reload --port 8000
 ```
 
-To run safely without cloud credentials, keep `AUTOMATOM_AGENT_MODE=offline`. The intended hosted deployment target is Google Cloud Run using the repository `Dockerfile` and `requirements-google.txt`. The Cloud Run service should inject `GEMINI_API_KEY` as a managed secret, expose only the API/health routes required for judging, and keep the approval boundary enabled.
+### Vertex AI / Gemini Enterprise Agent Platform mode
 
-The hackathon submission must additionally include a public hosted URL, a repository URL, this spin-up guide, a Google/Gemini architecture diagram, and a public demo video no longer than four minutes showing the asynchronous run, approval checkpoint, and Cloud Run evidence. Deployment, key configuration, public-link creation, and final submission are not performed automatically from this local branch.
+The adapter also supports Google Cloud Application Default Credentials, which avoids putting a service-account key or Gemini API key in the repository. After authenticating ADC locally with an approved Google Cloud account, use:
+
+```bash
+cd app
+python -m pip install -e .
+export AUTOMATOM_AGENT_MODE=gemini
+export GOOGLE_GENAI_USE_ENTERPRISE=true
+export GOOGLE_CLOUD_PROJECT=your-project-id
+export GOOGLE_CLOUD_LOCATION=us
+export GEMINI_MODEL=gemini-3.5-flash
+uvicorn main:app --reload --port 8000
+```
+
+The public Cloud Run service has been verified with this Vertex ADC configuration. Its current service URL is `https://automatom-briefrunner-447035175931.us-central1.run.app`, and the verified revision uses `GOOGLE_CLOUD_LOCATION=us`. The Cloud Run runtime service account requires the least-privilege `roles/aiplatform.user` role. Do not commit credentials or paste them into the README.
+
+To run safely without cloud credentials, keep `AUTOMATOM_AGENT_MODE=offline`. Offline mode is a deterministic development and judge-fallback path; it must not be described as live Gemini behavior. In every mode, the approval boundary remains enabled: approval changes the result state, but `sent` remains `false`.
+
+The hackathon submission must additionally include a public hosted URL, a repository URL, this spin-up guide, a Google/Gemini architecture diagram, and a public demo video no longer than four minutes showing the asynchronous run, the Gemini-generated brief when Gemini mode is enabled, the approval checkpoint, and Cloud Run evidence. The repository intentionally does not include secrets.
