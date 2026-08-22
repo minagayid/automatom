@@ -59,7 +59,12 @@ class ProfessionalBriefAgent:
     def __init__(self, mode: str | None = None) -> None:
         requested = mode or os.getenv("AUTOMATOM_AGENT_MODE", "offline")
         if requested == "auto":
-            if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
+            if (
+                os.getenv("GEMINI_API_KEY")
+                or os.getenv("GOOGLE_API_KEY")
+                or os.getenv("GOOGLE_GENAI_USE_ENTERPRISE", "").lower()
+                in {"1", "true", "yes"}
+            ):
                 requested = "gemini"
             else:
                 requested = "strands" if os.getenv("STRANDS_MODEL_ID") else "offline"
