@@ -16,21 +16,39 @@ the repetitive work behind a decision. BriefRunner makes that work visible and
 reviewable. The person remains the decision-maker, while the agent handles the
 first pass and records what happened.
 
+## Google-native hackathon path
+
+This branch is the Google-native submission path for the All Things Agentic
+Hackathon. The verified public deployment runs FastAPI on Cloud Run, starts an
+asynchronous workflow, calls Gemini 3.5 Flash through the Google GenAI SDK and
+Vertex AI, persists run state in SQLite, and stops at an explicit approval
+checkpoint. The public service is:
+
+`https://automatom-briefrunner-447035175931.us-central1.run.app`
+
+A live run was verified with `agentMode: gemini`. Before approval it returned an
+`awaiting_approval` state; after an explicit approval call it returned an
+approved state while `sent` remained `false`. The service account uses
+Application Default Credentials; no service-account key or API key is stored
+in this repository.
+
 ## How it works
 
 1. A user submits an intent through the FastAPI API.
 2. The background runner creates an inspectable workflow run.
-3. The Strands Agents SDK path uses two bounded, read-only tools: lookup of
-   demo context and brief drafting. With AWS credentials and a Bedrock model,
-   this path runs through `BedrockModel`.
-4. The default offline mode produces deterministic context so judges can run
-   the demo without cloud credentials.
+3. In this hackathon branch, the Google GenAI SDK path uses Gemini 3.5 Flash
+   through Vertex AI to draft a bounded, reviewable brief.
+4. SQLite stores the workflow, timestamps, status, and result so asynchronous
+   progress can be inspected through the public API.
 5. The result is `awaiting_approval`; `POST /runs/{runUid}/approve` changes the
    state to `approved` but still leaves `sent: false`. No message is sent
    automatically.
 
-This architecture follows the Strands Agents SDK pattern of composing an
-`Agent` with decorated tools, while keeping the demo honest and reproducible.
+The repository also retains two clearly separated development paths: a
+credential-free deterministic offline mode and an optional Strands/Bedrock
+adapter. Neither path changes the approval boundary or permits arbitrary shell
+execution.
+
 
 ## Quick start
 
@@ -101,10 +119,15 @@ API-facing camel-case result payload.
 
 ## Hackathon submission
 
-- Track: **Professional Agents**
-- SDK: **Strands Agents SDK** with an optional Amazon Bedrock model
-- Architecture diagram: `output/automatom-brief-runner-architecture.pdf`
-- Demo video: `output/automatom-brief-runner-demo.webm`
+- Track: **Taskmaster** — a complete multi-step workflow that takes action.
+- Google agent framework: **Google GenAI SDK**.
+- Model: **Gemini 3.5 Flash through Vertex AI**.
+- Google Cloud service: **Cloud Run**.
+- Hosted URL: `https://automatom-briefrunner-447035175931.us-central1.run.app`.
+- Architecture source: `all-things-agentic-architecture.mmd`.
+- Architecture image: `all-things-agentic-architecture.png`.
+- Demo source and evidence are prepared outside the repository; the final public
+  YouTube/Vimeo URL must be added to the Devpost submission after publication.
 
 ## License
 
@@ -141,7 +164,7 @@ export GEMINI_MODEL=gemini-3.5-flash
 uvicorn main:app --reload --port 8000
 ```
 
-The public Cloud Run service has been verified with this Vertex ADC configuration. Its current service URL is `https://automatom-briefrunner-447035175931.us-central1.run.app`, and the verified revision uses `GOOGLE_CLOUD_LOCATION=us`. The Cloud Run runtime service account requires the least-privilege `roles/aiplatform.user` role. Do not commit credentials or paste them into the README.
+The public Cloud Run service has been verified with this Vertex ADC configuration. Its current service URL is `https://automatom-briefrunner-447035175931.us-central1.run.app`, and the verified revision uses `GOOGLE_CLOUD_LOCATION=us` for Gemini inference. The Cloud Run runtime service account requires the least-privilege `roles/aiplatform.user` role. Do not commit credentials or paste them into the README.
 
 To run safely without cloud credentials, keep `AUTOMATOM_AGENT_MODE=offline`. Offline mode is a deterministic development and judge-fallback path; it must not be described as live Gemini behavior. In every mode, the approval boundary remains enabled: approval changes the result state, but `sent` remains `false`.
 
