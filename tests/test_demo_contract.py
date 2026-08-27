@@ -1,6 +1,6 @@
 import unittest
 
-from app.strands_runtime import ProfessionalBriefAgent, result_payload
+from app.brief_runner import ProfessionalBriefAgent, result_payload
 
 
 class DemoContractTests(unittest.TestCase):

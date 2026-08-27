@@ -1,8 +1,33 @@
-app/dist
-app/venv
-app/.venv
-app/.pytest_cache
-app/**/.mypy_cache
-app/**/.ruff_cache
-app/**/.DS_Store
-app/**/__pycache__
+# Python environments and generated files
+.venv/
+venv/
+app/venv/
+app/.venv/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+app/.pytest_cache/
+.mypy_cache/
+**/.mypy_cache/
+.ruff_cache/
+**/.ruff_cache/
+*.py[cod]
+
+# Local run-state databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+service-account*.json
+
+# Build and editor artifacts
+dist/
+build/
+*.egg-info/
+.DS_Store

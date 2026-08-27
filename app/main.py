@@ -28,7 +28,8 @@ from schemas import (
     WorkflowTrigger,
 )
 from services import records
-from strands_runtime import ProfessionalBriefAgent, result_payload
+from brief_runner import ProfessionalBriefAgent, result_payload
+from google_runtime import runtime_metadata
 
 store = records.Store()
 
@@ -192,7 +193,15 @@ async def start_demo_run(request: DemoRunRequest, background_tasks: BackgroundTa
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "service": "automatom", "execution": "asynchronous"}
+    """Report safe deployment metadata for operational checks and the demo video."""
+
+    return {
+        "ok": True,
+        "service": "automatom-briefrunner",
+        "execution": "asynchronous",
+        "agentMode": professional_agent.mode,
+        "runtime": runtime_metadata(),
+    }
 
 
 @app.get("/runs/{run_uid}", response_model=Optional[Run])

@@ -1,6 +1,6 @@
 import unittest
 
-from app.strands_runtime import AgentResult, ProfessionalBriefAgent
+from app.brief_runner import AgentResult, ProfessionalBriefAgent
 
 
 class ProfessionalBriefAgentTests(unittest.TestCase):

@@ -1,171 +1,158 @@
 # Automatom — BriefRunner
 
-**A Professional Agent that turns repetitive requests into reviewable background briefs.**
+**Automatom — BriefRunner** is an approval-gated background agent that turns a recurring professional request into a concise, reviewable briefing. It addresses the gap between a one-off chat response and dependable work progress: the agent drafts a structured brief asynchronously, persists the run state, and stops before any external communication so a person remains responsible for approval.
 
-Automatom is a small, inspectable workflow runtime for professionals who repeat
-the same research and status-reporting work every week. Its hackathon agent,
-**BriefRunner**, accepts a plain-language request such as “prepare my weekly
-competitor brief,” gathers bounded context, drafts a structured brief, and
-stops at an explicit human approval boundary before any notification could be
-sent.
+> **Hackathon category:** Taskmaster. BriefRunner performs a bounded, multi-step workflow in the background rather than presenting a generic chat interface.
 
-## Why this matters
+## Submission compliance
 
-Busy teams do not need another chat answer; they need dependable progress on
-the repetitive work behind a decision. BriefRunner makes that work visible and
-reviewable. The person remains the decision-maker, while the agent handles the
-first pass and records what happened.
+The All Things Agentic Hackathon requires Gemini 3.5 or later, a Google agent framework, and a Google Cloud infrastructure service. This implementation uses all three in the production path. The local deterministic mode is provided only so reviewers can inspect the approval workflow without credentials; it is never presented as Gemini output. [1]
 
-## Google-native hackathon path
+| Required element | BriefRunner implementation | Evidence reviewers can inspect |
+|---|---|---|
+| Gemini model | `gemini-3.5-flash` invoked through Vertex AI | `app/google_runtime.py` and the live `/health` endpoint |
+| Google agent framework | Google Gen AI SDK (`google-genai`) | `requirements-google.txt` and `app/google_runtime.py` |
+| Google Cloud infrastructure | Cloud Run container deployment | `Dockerfile`, deployment commands, Cloud Run service URL, and video evidence |
+| Autonomous workflow | FastAPI starts a background run, then exposes its status | `POST /demo-runs`, `GET /runs/{runUid}` |
+| Human control | A result remains `awaiting_approval`; approval never sends a message | `POST /runs/{runUid}/approve` and automated tests |
 
-This branch is the Google-native submission path for the All Things Agentic
-Hackathon. The verified public deployment runs FastAPI on Cloud Run, starts an
-asynchronous workflow, calls Gemini 3.5 Flash through the Google GenAI SDK and
-Vertex AI, persists run state in SQLite, and stops at an explicit approval
-checkpoint. The public service is:
+## Architecture
 
-`https://automatom-briefrunner-447035175931.us-central1.run.app`
+![BriefRunner Google-native architecture](all-things-agentic-architecture.png)
 
-A live run was verified with `agentMode: gemini`. Before approval it returned an
-`awaiting_approval` state; after an explicit approval call it returned an
-approved state while `sent` remained `false`. The service account uses
-Application Default Credentials; no service-account key or API key is stored
-in this repository.
+A request first enters the FastAPI service running on Cloud Run. The background runner invokes the Google Gen AI SDK, configured for Vertex AI Application Default Credentials, to call Gemini and produce a reviewable brief. The run and its status are stored locally for this small demonstration. The API exposes the result for review; an explicit approval only records an approved handoff state and never dispatches a notification.
 
-## How it works
-
-1. A user submits an intent through the FastAPI API.
-2. The background runner creates an inspectable workflow run.
-3. In this hackathon branch, the Google GenAI SDK path uses Gemini 3.5 Flash
-   through Vertex AI to draft a bounded, reviewable brief.
-4. SQLite stores the workflow, timestamps, status, and result so asynchronous
-   progress can be inspected through the public API.
-5. The result is `awaiting_approval`; `POST /runs/{runUid}/approve` changes the
-   state to `approved` but still leaves `sent: false`. No message is sent
-   automatically.
-
-The repository also retains two clearly separated development paths: a
-credential-free deterministic offline mode and an optional Strands/Bedrock
-adapter. Neither path changes the approval boundary or permits arbitrary shell
-execution.
-
-
-## Quick start
-
-```bash
-cd app
-python -m pip install -e .
-uvicorn main:app --reload --port 8000
+```mermaid
+flowchart LR
+    U[Professional request] --> API[FastAPI on Cloud Run]
+    API --> R[Background workflow runner]
+    R --> G[Google Gen AI SDK]
+    G --> V[Gemini 3.5 Flash via Vertex AI]
+    V --> B[Reviewable brief]
+    B --> S[(Run-state store)]
+    S --> A[Status API]
+    A --> H[Human approval checkpoint]
+    H --> N[Approved handoff only]
+    N -. No automatic send .-> O[Optional future notification connector]
+    API --> L[Cloud Logging]
+    R --> L
+    G --> L
 ```
 
-The Strands and AWS dependencies are included for the cloud-backed path. For
-the deterministic local demo, no AWS credentials are needed. To opt into the
-Strands path, set `AUTOMATOM_AGENT_MODE=strands`, `STRANDS_MODEL_ID` (for
-example `amazon.nova-lite-v1:0`), and `AWS_REGION`.
+## What happens during a run
 
-## Demo
+1. `POST /demo-runs` accepts a plain-English intent and records a queued workflow.
+2. The background worker marks the run as running and creates a structured brief with Gemini when Vertex AI is configured.
+3. `GET /runs/{runUid}` returns queued, running, or completed state plus the reviewable result.
+4. The completed result reports `awaiting_approval`, `approvalRequired: true`, `notificationStatus: "pending_approval"`, and `sent: false`.
+5. `POST /runs/{runUid}/approve` records approval but preserves `sent: false`.
 
-```bash
-curl -X POST http://localhost:8000/demo-runs \
-  -H "content-type: application/json" \
-  -d '{"intent":"Prepare a weekly competitor brief"}'
-```
+The restriction on outbound action is deliberate. The demo does not claim access to live competitor data, execute arbitrary code, or send a message without a clearly visible human checkpoint.
 
-Poll the returned `runUid`:
+## Run locally
 
-```bash
-curl http://localhost:8000/runs/<runUid>
-```
+### Deterministic review mode (no cloud credentials)
 
-The completed `result` contains `agentMode`, `brief`,
-`notificationStatus: "pending_approval"`, `approvalRequired: true`, and
-`sent: false`. After reviewing the brief, approve it explicitly:
+This mode is intended for inspecting the API contract and safety boundary. It does **not** call Gemini.
 
 ```bash
-curl -X POST http://localhost:8000/runs/<runUid>/approve
+git clone <submission-repository-url>
+cd automatom-briefrunner
+python -m venv .venv
+. .venv/bin/activate
+pip install -r requirements-google.txt
+PYTHONPATH=app uvicorn main:app --reload --port 8000
 ```
 
-Approval is intentionally a state transition, not an automatic outbound
-action. A real integration would add a separately authenticated sender after
-the approval boundary.
-
-## API
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/workflows` | Create a workflow from intent and steps |
-| `POST` | `/runs` | Start a workflow and return immediately |
-| `POST` | `/demo-runs` | Start the BriefRunner demo agent |
-| `GET` | `/runs/{run_uid}` | Fetch run status and output |
-| `POST` | `/runs/{run_uid}/approve` | Approve a prepared result without sending |
-| `GET` | `/health` | Check runtime availability |
-
-## Safety and scope
-
-BriefRunner has no arbitrary shell tool, no uncontrolled outbound messaging,
-and no claim of live competitor data in offline mode. Its tool surface is
-bounded, the output is persisted in SQLite, and every demo notification stops
-for human review. Production integrations should add scoped credentials,
-sandboxed execution, audit logging, and an authenticated approval workflow.
-
-## Verification
+Start a run in a second terminal:
 
 ```bash
-python -m unittest -v tests.test_strands_runtime tests.test_demo_contract
+curl -sS -X POST http://localhost:8000/demo-runs \
+  -H 'content-type: application/json' \
+  -d '{"intent":"Prepare a weekly competitor brief for a small professional team"}'
 ```
 
-The tests cover the offline brief contract, the approval transition, and the
-API-facing camel-case result payload.
+Copy `runUid` from the response and poll it:
 
-## Hackathon submission
+```bash
+curl -sS http://localhost:8000/runs/<runUid>
+curl -sS -X POST http://localhost:8000/runs/<runUid>/approve
+```
 
-- Track: **Taskmaster** — a complete multi-step workflow that takes action.
-- Google agent framework: **Google GenAI SDK**.
-- Model: **Gemini 3.5 Flash through Vertex AI**.
-- Google Cloud service: **Cloud Run**.
-- Hosted URL: `https://automatom-briefrunner-447035175931.us-central1.run.app`.
-- Architecture source: `all-things-agentic-architecture.mmd`.
-- Architecture image: `all-things-agentic-architecture.png`.
-- Demo source and evidence are prepared outside the repository; the final public
-  YouTube/Vimeo URL must be added to the Devpost submission after publication.
+### Gemini on Vertex AI
+
+This is the production configuration used for Cloud Run. Authenticate with Application Default Credentials or deploy with a Cloud Run service account authorized to invoke Vertex AI. Never commit API keys or service-account keys.
+
+```bash
+export AUTOMATOM_AGENT_MODE=gemini
+export GOOGLE_GENAI_USE_VERTEXAI=true
+export GOOGLE_CLOUD_PROJECT=<your-project-id>
+export GOOGLE_CLOUD_LOCATION=us-central1
+export GEMINI_MODEL=gemini-3.5-flash
+PYTHONPATH=app uvicorn main:app --port 8000
+```
+
+Open `http://localhost:8000/health`. A correctly configured production path reports `agentMode: "gemini"`, `agentFramework: "Google Gen AI SDK"`, `vertexAiConfigured: true`, and `cloudTarget: "Cloud Run"` without exposing secrets.
+
+## Deploy to Cloud Run
+
+The following commands build the container from `Dockerfile`, deploy it to Cloud Run, and configure the Google-native agent path. Use a service account with the least privileges necessary to invoke Vertex AI and write Cloud Logging entries. The command deliberately keeps the service unauthenticated only for a hackathon demo endpoint; use IAM authentication for non-demo deployments.
+
+```bash
+PROJECT_ID=<your-project-id>
+REGION=us-central1
+SERVICE=automatom-briefrunner
+
+gcloud config set project "$PROJECT_ID"
+gcloud services enable run.googleapis.com aiplatform.googleapis.com cloudbuild.googleapis.com
+
+gcloud run deploy "$SERVICE" \
+  --source . \
+  --region "$REGION" \
+  --allow-unauthenticated \
+  --set-env-vars "AUTOMATOM_AGENT_MODE=gemini,GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=$REGION,GEMINI_MODEL=gemini-3.5-flash"
+
+gcloud run services describe "$SERVICE" \
+  --region "$REGION" \
+  --format='value(status.url)'
+```
+
+After deployment, verify the returned `.run.app` URL before adding it to the Devpost form:
+
+```bash
+SERVICE_URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')
+curl -sS "$SERVICE_URL/health"
+```
+
+## Test the repository
+
+```bash
+python -m pytest -q
+```
+
+The tests exercise the deterministic contract, approval behavior, and the camel-case payload returned by the API. They do not make paid cloud calls.
+
+## Demo video checklist
+
+The submission video must be public on YouTube or Vimeo, in English, and no longer than four minutes. It should show the problem, the value proposition, a live run and approval checkpoint, plus direct proof of the backend running on Google Cloud (for example, the Cloud Run dashboard, service URL, or Vertex AI logs). [1]
+
+| Suggested time | Visible proof |
+|---|---|
+| 0:00–0:25 | The recurring briefing problem and why an approval-gated agent helps |
+| 0:25–0:50 | Cloud Run service dashboard and the `.run.app` URL or `/health` response |
+| 0:50–2:20 | `POST /demo-runs`, polling a Gemini-mode run, and the generated reviewable brief |
+| 2:20–2:50 | `POST /runs/{runUid}/approve`, showing `sent: false` |
+| 2:50–3:20 | Architecture diagram, Google Gen AI SDK, Gemini on Vertex AI, and Cloud Run |
+| 3:20–3:40 | Transparent scope statement and closing value proposition |
+
+## Project-history disclosure
+
+BriefRunner’s hackathon-specific work was created during the Submission Period, including the BriefRunner workflow, Google Gen AI SDK integration, Vertex AI configuration, Cloud Run packaging, architecture, test updates, and submission documentation. The project incorporates pre-existing generic Automatom workflow scaffolding. The exact scope, provenance, and licensing of that reuse are disclosed in [`PRE_EXISTING_WORK.md`](PRE_EXISTING_WORK.md), as the official rules require. [1]
 
 ## License
 
-MIT
+MIT. See [`LICENSE`](LICENSE).
 
+## References
 
-## Google-native hackathon mode
-
-The `hackathon/all-things-agentic-google-native` branch adds a bounded Gemini path for the All Things Agentic Hackathon while preserving the deterministic offline demo and the existing optional Strands/Bedrock path. The Google path uses the Google GenAI SDK through `google_runtime.py`: it prepares a reviewable brief, records uncertainty, and never sends notifications or performs irreversible actions.
-
-### Local Gemini API-key mode
-
-```bash
-cd app
-python -m pip install -e .
-export AUTOMATOM_AGENT_MODE=gemini
-export GEMINI_API_KEY=your_key_here
-export GEMINI_MODEL=gemini-3.5-flash
-uvicorn main:app --reload --port 8000
-```
-
-### Vertex AI / Gemini Enterprise Agent Platform mode
-
-The adapter also supports Google Cloud Application Default Credentials, which avoids putting a service-account key or Gemini API key in the repository. After authenticating ADC locally with an approved Google Cloud account, use:
-
-```bash
-cd app
-python -m pip install -e .
-export AUTOMATOM_AGENT_MODE=gemini
-export GOOGLE_GENAI_USE_ENTERPRISE=true
-export GOOGLE_CLOUD_PROJECT=your-project-id
-export GOOGLE_CLOUD_LOCATION=us
-export GEMINI_MODEL=gemini-3.5-flash
-uvicorn main:app --reload --port 8000
-```
-
-The public Cloud Run service has been verified with this Vertex ADC configuration. Its current service URL is `https://automatom-briefrunner-447035175931.us-central1.run.app`, and the verified revision uses `GOOGLE_CLOUD_LOCATION=us` for Gemini inference. The Cloud Run runtime service account requires the least-privilege `roles/aiplatform.user` role. Do not commit credentials or paste them into the README.
-
-To run safely without cloud credentials, keep `AUTOMATOM_AGENT_MODE=offline`. Offline mode is a deterministic development and judge-fallback path; it must not be described as live Gemini behavior. In every mode, the approval boundary remains enabled: approval changes the result state, but `sent` remains `false`.
-
-The hackathon submission must additionally include a public hosted URL, a repository URL, this spin-up guide, a Google/Gemini architecture diagram, and a public demo video no longer than four minutes showing the asynchronous run, the Gemini-generated brief when Gemini mode is enabled, the approval checkpoint, and Cloud Run evidence. The repository intentionally does not include secrets.
+[1]: https://allthingsagentichackathon.devpost.com/rules "All Things Agentic Hackathon Official Rules"
